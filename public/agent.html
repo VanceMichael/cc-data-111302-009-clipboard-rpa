@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>剪贴板录入操作台</title>
+<style>
+  :root { color-scheme: light; }
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; background: #f5f6f8; color: #1d232b; }
+  header { padding: 18px 24px; background: #1d2939; color: #fff; display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+  header h1 { font-size: 19px; margin: 0; }
+  header a { color: #9fd0ff; }
+  main { display: grid; gap: 16px; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); padding: 24px; }
+  section, .card { background: #fff; border: 1px solid #d8dde5; border-radius: 10px; padding: 16px; }
+  h2 { font-size: 15px; margin: 0 0 12px; }
+  label { display: block; font-size: 13px; color: #45525f; margin: 8px 0 4px; }
+  input, select { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid #c3cad4; border-radius: 6px; font: inherit; }
+  button { padding: 7px 12px; border: 1px solid #c3cad4; background: #fff; border-radius: 6px; cursor: pointer; font: inherit; }
+  button.primary { background: #1458c8; border-color: #1458c8; color: #fff; }
+  button.danger { color: #b42318; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  #records { display: grid; gap: 8px; max-height: 60vh; overflow: auto; }
+  .record { border: 1px solid #d8dde5; border-radius: 8px; padding: 8px 10px; cursor: pointer; background: #fbfcfe; }
+  .record.active { border-color: #1458c8; box-shadow: 0 0 0 2px #dbe7ff; }
+  .badge { display: inline-block; font-size: 12px; padding: 1px 7px; border-radius: 999px; background: #eceff4; margin-right: 6px; }
+  .status-pasted { background: #e5f5ea; color: #17663a; }
+  .status-blocked, .status-interrupted { background: #fdeceb; color: #9d2119; }
+  .status-needs-review { background: #fff4e0; color: #855400; }
+  .status-paused { background: #ecebff; color: #4338a8; }
+  .status-published { background: #e5f5ea; color: #17663a; }
+  pre { white-space: pre-wrap; word-break: break-word; background: #f5f6f8; border-radius: 8px; padding: 12px; font-size: 12.5px; max-height: 46vh; overflow: auto; }
+  .note { color: #5b6775; font-size: 13px; }
+  #message { min-height: 22px; color: #1d232b; font-size: 13px; }
+  #events { font-size: 12px; color: #5b6775; max-height: 20vh; overflow: auto; }
+</style>
+<header>
+  <h1>剪贴板录入操作台</h1>
+  <span>来源：<a id="sourceLink" target="_blank">/index.html</a></span>
+  <span>门户：<a id="portalLink" target="_blank">/portal.html</a></span>
+</header>
+<main>
+  <div>
+    <section>
+      <h2>新建记录</h2>
+      <label>产品</label>
+      <select id="product"></select>
+      <label>资料员</label>
+      <input id="accountant" placeholder="例如 资料员甲">
+      <div class="row">
+        <button id="create" class="primary">复制并核对剪贴板</button>
+      </div>
+      <p class="note">机器人会先清空自身上下文的剪贴板，再在来源页执行真实复制，并核对本次复制动作的标记。</p>
+      <div id="message"></div>
+    </section>
+    <section style="margin-top:16px">
+      <h2>记录</h2>
+      <div id="records"></div>
+    </section>
+  </div>
+  <section>
+    <h2>当前记录</h2>
+    <div id="detail"><p class="note">从左侧选择一条记录。</p></div>
+    <h2 style="margin-top:18px">事件</h2>
+    <div id="events"></div>
+  </section>
+</main>
+<script>
+const $ = selector => document.querySelector(selector);
+let selected = null;
+let records = [];
+
+function make(tag, text, className) {
+  const element = document.createElement(tag);
+  if (text !== undefined) element.textContent = text;
+  if (className) element.className = className;
+  return element;
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    method: options.method ?? 'GET',
+    headers: options.body ? {'Content-Type': 'application/json'} : undefined,
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+  const value = await response.json().catch(() => ({}));
+  if (!response.ok) throw Object.assign(new Error(value.error ?? `请求失败 ${response.status}`), {details: value});
+  return value;
+}
+
+async function loadInventory() {
+  const inventory = await (await fetch('/inventory')).json();
+  const select = $('#product');
+  select.innerHTML = '';
+  for (const product of Object.values(inventory.products ?? {})) {
+    const option = make('option', `${product.title} (${product.product} / v${product.version})`);
+    option.value = product.product;
+    select.append(option);
+  }
+}
+
+async function loadRecords() {
+  const {records: list} = await api('/api/records');
+  records = list;
+  const container = $('#records');
+  container.innerHTML = '';
+  for (const record of [...list].reverse()) {
+    const card = make('div', undefined, `record${record.id === selected ? ' active' : ''}`);
+    const badge = make('span', record.status, `badge status-${record.status}`);
+    card.append(badge, make('strong', record.title ?? record.product));
+    card.append(make('div', `资料员：${record.accountant} · 产品 ${record.product}`));
+    card.append(make('div', `表示：${record.adoptedRepresentation ?? '—'} · 清理：${record.settle ? '完成' : '未完成'} · 待确认 ${record.confirmations.length}`));
+    card.onclick = () => { selected = record.id; renderDetail(record); loadRecords(); };
+    container.append(card);
+  }
+}
+
+function confirmationsView(record) {
+  const list = make('div');
+  for (const item of record.confirmations ?? []) {
+    const row = make('div');
+    row.style.margin = '4px 0';
+    row.append(make('div', `• ${item.label}`));
+    const button = make('button', '已了解并确认');
+    button.onclick = async () => {
+      try {
+        await api(`/api/records/${record.id}/acknowledge`, {method: 'POST', body: {accountant: $('#accountant').value || record.accountant, ids: [item.id], note: '操作台确认降级'}});
+        setMessage('已记录人工确认。');
+        await refresh();
+      } catch (error) { setMessage(error.message); }
+    };
+    row.append(button);
+    list.append(row);
+  }
+  return list;
+}
+
+function renderDetail(record) {
+  const detail = $('#detail');
+  detail.innerHTML = '';
+  const title = make('div');
+  title.append(make('span', record.status, `badge status-${record.status}`), make('strong', record.title ?? record.product));
+  detail.append(title);
+  detail.append(make('p', `记录 ${record.id} · 资料员 ${record.accountant} · 阶段 ${record.phase}`, 'note'));
+
+  if (record.copy) {
+    detail.append(make('h3', '复制来源'));
+    detail.append(make('pre', JSON.stringify(record.copy, null, 2)));
+  }
+  if (record.clipboard) {
+    detail.append(make('h3', '剪贴板核对'));
+    detail.append(make('pre', JSON.stringify(record.clipboard, null, 2)));
+  }
+  if (record.paste) {
+    detail.append(make('h3', '粘贴事件与被采用的表示'));
+    detail.append(make('pre', JSON.stringify(record.paste, null, 2)));
+  }
+  if (record.cleanup) {
+    detail.append(make('h3', '清理'));
+    detail.append(make('pre', JSON.stringify(record.cleanup, null, 2)));
+  }
+  if (record.readback) {
+    detail.append(make('h3', '目标回读摘要'));
+    detail.append(make('pre', JSON.stringify(record.readback, null, 2)));
+  }
+  if (record.issues?.length) {
+    detail.append(make('h3', '未解决'));
+    detail.append(make('pre', JSON.stringify(record.issues, null, 2)));
+  }
+  if (record.confirmations?.length) {
+    detail.append(make('h3', '人工待确认项'));
+    detail.append(confirmationsView(record));
+  }
+  if (record.handovers?.length) {
+    detail.append(make('h3', '交接'));
+    detail.append(make('pre', JSON.stringify(record.handovers, null, 2)));
+  }
+
+  const actions = make('div', undefined, 'row');
+  const addAction = (label, action, className) => {
+    const button = make('button', label, className);
+    button.onclick = async () => {
+      setMessage(`${label}…`);
+      try { await api(`/api/records/${record.id}/${action}`, {method: 'POST', body: {accountant: $('#accountant').value || undefined}}); setMessage(`${label}完成`); await refresh(); }
+      catch (error) { setMessage(error.message); }
+    };
+    actions.append(button);
+  };
+  addAction('粘贴并等待清理', 'paste', 'primary');
+  addAction('重新复制', 'recopy');
+  addAction('暂停', 'pause');
+  addAction('换人继续', 'resume');
+  addAction('标记完成', 'publish');
+  detail.append(actions);
+}
+
+function setMessage(text) { $('#message').textContent = text; }
+
+async function refresh() {
+  try { await loadRecords(); await selectRecord(); }
+  catch (error) { setMessage(error.message); }
+}
+
+async function selectRecord() {
+  if (!selected) return;
+  const value = await api(`/api/records/${selected}`);
+  renderDetail(value.summary);
+}
+$('#create').onclick = async () => {
+  const body = {product: $('#product').value, accountant: $('#accountant').value.trim()};
+  if (!body.accountant) return setMessage('请填写资料员。');
+  setMessage('正在复制并核对剪贴板…');
+  try {
+    const result = await api('/api/records', {method: 'POST', body});
+    selected = result.record.id;
+    setMessage(result.ok ? '复制已核对，可以粘贴。' : `复制未通过核对：${result.reason ?? result.code}`);
+    await refresh();
+  } catch (error) { setMessage(error.message); }
+};
+
+const events = $('#events');
+new EventSource('/api/events').onmessage = message => {
+  const event = JSON.parse(message.data);
+  events.prepend(make('div', `${new Date().toLocaleTimeString()} ${event.type} ${event.record?.id ?? ''}`));
+  if (event.record?.id === selected) selectRecord().catch(() => {});
+};
+loadInventory().catch(error => setMessage(error.message));
+loadRecords().catch(error => setMessage(error.message));
+$('#sourceLink').href = '/index.html';
+$('#portalLink').href = '/portal.html';
+</script>
+</body></html>

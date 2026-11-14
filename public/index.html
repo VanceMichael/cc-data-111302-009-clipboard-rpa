@@ -1,2 +1,70 @@
-<html lang="zh-CN"><meta charset="utf-8"><title>跨窗口富内容粘贴的浏览器录入自动化</title><body><h1>产品资料来源</h1><article id="product" data-product="P-1" data-version="1"><h2>合成产品甲</h2><p>耐用外壳</p><table><tr><td>尺寸</td><td>20 cm</td></tr></table><a href="https://example.test/manual">说明书</a></article><button id="copy">复制资料</button><button id="change">更新版本</button><output id="copied"></output><script>
-copy.onclick=async()=>{await navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([product.outerHTML],{type:'text/html'}),'text/plain':new Blob([product.innerText],{type:'text/plain'})})]);copied.textContent='已复制';};change.onclick=()=>{product.dataset.version=String(Number(product.dataset.version)+1);product.querySelector('p').textContent='更新后的外壳';};</script></body></html>
+<html lang="zh-CN"><meta charset="utf-8"><title>产品资料来源</title><body><h1>产品资料来源</h1><div id="catalog"></div><output id="copied"></output><script>
+const catalog=document.querySelector('#catalog');
+const copied=document.querySelector('#copied');
+function render(product){
+  const image=product.image?`<img src="${product.image.src}" alt="${product.image.alt}">`:'';
+  const links=(product.links||[]).map(link=>`<a href="${link.href}">${link.text}</a>`).join(' · ');
+  return `<article id="${product.product.toLowerCase()}" data-product="${product.product}" data-version="${product.version}">`+
+    `<h2>${product.title}</h2>`+
+    product.paragraphs.map(paragraph=>`<p>${paragraph}</p>`).join('')+
+    image+
+    `<table><thead><tr>${product.table.headers.map(header=>`<th>${header}</th>`).join('')}</tr></thead>`+
+    `<tbody>${product.table.rows.map(row=>`<tr>${row.map(cell=>`<td>${cell}</td>`).join('')}</tr>`).join('')}</tbody></table>`+
+    (links?`<p>附件：${links}</p>`:'')+
+    `</article>`;
+}
+async function load(){
+  const response=await fetch('/inventory',{cache:'no-store'});
+  const state=await response.json();
+  const products=state.products||{};
+  catalog.innerHTML='';
+  let first=true;
+  for(const product of Object.values(products)){
+    const article=document.createElement('article');
+    article.innerHTML=render(product);
+    const card=article.firstElementChild;
+    const button=document.createElement('button');
+    button.className='copy';
+    if(first){button.id='copy';first=false;}
+    button.textContent='复制资料';
+    button.dataset.product=product.product;
+    card.append(button);
+    const change=document.createElement('button');
+    change.className='change';
+    if(card.dataset.product==='P-1')change.id='change';
+    change.textContent='更新版本';
+    card.append(change);
+    const image=card.querySelector('img');
+    if(image)image.addEventListener('error',()=>{image.remove();}, {once:true});
+    catalog.append(card);
+  }
+}
+document.addEventListener('click',async event=>{
+  const button=event.target.closest('.copy, .change');
+  if(!button)return;
+  const card=button.closest('article');
+  const productId=card.dataset.product;
+  if(button.classList.contains('change')){
+    await fetch('/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({product:productId,version:Number(card.dataset.version)+1})});
+    await load();
+    return;
+  }
+  const version=card.dataset.version;
+  const token=crypto.randomUUID();
+  const marker=`<!--clipboard-copy token="${token}" product="${productId}" version="${version}"-->`;
+  const html=marker+card.outerHTML;
+  const plain=card.innerText;
+  copied.textContent='复制中';
+  try{
+    await navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([html],{type:'text/html'}),'text/plain':new Blob([plain],{type:'text/plain'})})]);
+    window.__lastCopy={token,product:productId,version,html,plain,at:new Date().toISOString()};
+    copied.textContent='已复制';
+    copied.dataset.product=productId;
+    copied.dataset.version=version;
+  }catch(error){
+    window.__lastCopyError={name:error.name,message:error.message};
+    copied.textContent='复制失败';
+  }
+});
+load();
+</script></body></html>

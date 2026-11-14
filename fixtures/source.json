@@ -1,4 +1,72 @@
 {
   "version": 1,
-  "product": "P-1"
+  "product": "P-1",
+  "products": {
+    "P-1": {
+      "product": "P-1",
+      "version": 1,
+      "title": "合成产品甲",
+      "paragraphs": [
+        "耐用外壳",
+        "适用于室内展示。"
+      ],
+      "image": {
+        "src": "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
+        "alt": "产品外观示意图"
+      },
+      "table": {
+        "headers": [
+          "项目",
+          "参数"
+        ],
+        "rows": [
+          [
+            "尺寸",
+            "20 cm"
+          ]
+        ]
+      },
+      "links": [
+        {
+          "text": "说明书",
+          "href": "https://example.test/manual"
+        },
+        {
+          "text": "旧版说明",
+          "href": "http://legacy.example.test/old"
+        }
+      ]
+    },
+    "P-2": {
+      "product": "P-2",
+      "version": 1,
+      "title": "合成产品乙",
+      "paragraphs": [
+        "轻量外壳",
+        "适合移动展示。"
+      ],
+      "table": {
+        "headers": [
+          "项目",
+          "参数"
+        ],
+        "rows": [
+          [
+            "重量",
+            "1.2 kg"
+          ],
+          [
+            "颜色",
+            "灰色"
+          ]
+        ]
+      },
+      "links": [
+        {
+          "text": "产品页",
+          "href": "https://example.test/p2"
+        }
+      ]
+    }
+  }
 }

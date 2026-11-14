@@ -1,2 +1,83 @@
-<html lang="zh-CN"><meta charset="utf-8"><body><h1>发布门户</h1><div id="editor" contenteditable="true" role="textbox" aria-label="资料正文"></div><output id="status"></output><script>
-editor.addEventListener('paste',event=>{event.preventDefault();status.textContent='清理中';editor.dataset.settled='false';const html=event.clipboardData.getData('text/html');editor.innerHTML=html||event.clipboardData.getData('text/plain');setTimeout(()=>{for(const element of editor.querySelectorAll('script,style,img'))element.remove();for(const element of editor.querySelectorAll('*')){for(const attribute of [...element.attributes])if(attribute.name.startsWith('on'))element.removeAttribute(attribute.name);}editor.dataset.settled='true';status.textContent='已清理';},100);});</script></body></html>
+<html lang="zh-CN"><meta charset="utf-8"><title>发布门户</title><body><h1>发布门户</h1><div id="editor" contenteditable="true" role="textbox" aria-label="资料正文"></div><label>发布备注 <input id="notes" type="text"></label><output id="status"></output><script>
+const editor=document.querySelector('#editor');
+const notes=document.querySelector('#notes');
+const status=document.querySelector('#status');
+const params=new URLSearchParams(location.search);
+const requested=Number(params.get('sanitizeDelay'));
+const sanitizeDelay=Number.isFinite(requested)&&requested>=0?requested:100;
+const allowedLinkProtocol='https:';
+
+window.__portalState={sanitizeDelay,pending:false,cleaning:'idle',pauseCount:0,resumeCount:0,settleCount:0,lastPasteTypes:null};
+window.__portalEvents=[];
+const mark=name=>window.__portalEvents.push({name,at:performance.now()});
+
+function sanitize(){
+  for(const element of editor.querySelectorAll('script,style,img,iframe,video,audio,object,embed,link,meta,form,input,button,textarea,select'))element.remove();
+  for(const element of editor.querySelectorAll('*')){
+    for(const attribute of [...element.attributes])if(attribute.name.startsWith('on'))element.removeAttribute(attribute.name);
+    if(element.tagName==='A'){
+      let href=null;
+      try{href=element.getAttribute('href')?new URL(element.getAttribute('href'),location.href):null;}catch{}
+      if(!href||href.protocol!==allowedLinkProtocol)element.removeAttribute('href');
+    }
+  }
+}
+
+let timer=null;
+
+function settle(){
+  timer=null;
+  if(!window.__portalState.pending)return;
+  sanitize();
+  window.__portalState.pending=false;
+  window.__portalState.cleaning='done';
+  window.__portalState.settleCount+=1;
+  editor.dataset.cleaning='done';
+  editor.dataset.settled='true';
+  status.textContent='已清理';
+  mark('settled');
+}
+
+function schedule(){
+  if(timer)clearTimeout(timer);
+  window.__portalState.cleaning='pending';
+  editor.dataset.cleaning='pending';
+  editor.dataset.settled='false';
+  status.textContent='清理中';
+  timer=setTimeout(settle,sanitizeDelay);
+}
+
+function pause(reason){
+  if(!window.__portalState.pending||window.__portalState.cleaning!=='pending'||!timer)return;
+  clearTimeout(timer);
+  timer=null;
+  window.__portalState.cleaning='paused';
+  window.__portalState.pauseCount+=1;
+  editor.dataset.cleaning='paused';
+  status.textContent='等待焦点';
+  mark('paused:'+reason);
+}
+
+function resume(){
+  if(!window.__portalState.pending||timer)return;
+  window.__portalState.resumeCount+=1;
+  mark('resumed');
+  schedule();
+}
+
+editor.addEventListener('paste',event=>{
+  event.preventDefault();
+  const html=event.clipboardData.getData('text/html');
+  const text=event.clipboardData.getData('text/plain');
+  window.__portalState.lastPasteTypes=[...event.clipboardData.types];
+  window.__portalState.pending=true;
+  if(html)editor.innerHTML=html;
+  else editor.textContent=text;
+  schedule();
+  mark('paste');
+});
+editor.addEventListener('blur',()=>pause('editor-blur'));
+window.addEventListener('blur',()=>pause('window-blur'));
+editor.addEventListener('focus',()=>resume());
+window.addEventListener('focus',()=>resume());
+</script></body></html>
